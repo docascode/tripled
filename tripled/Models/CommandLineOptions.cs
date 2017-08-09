@@ -11,5 +11,8 @@ namespace tripled.Models
     {
         [Option('x', "xml", Required = true, HelpText = "Source of the XML files.")]
         public string XmlPath { get; set; }
+
+        [Option('l', "log", Required = false, HelpText = "Determines whether to produce a log in the app location.")]
+        public bool EnableLogging { get; set; }
     }
 }
