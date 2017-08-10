@@ -1,7 +1,9 @@
 ﻿using CommandLine;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Xml.Linq;
+using System.Xml.XPath;
 using tripled.Kernel;
 using tripled.Models;
 
@@ -18,6 +20,12 @@ namespace tripled
 
             Parser.Default.ParseArguments<CommandLineOptions>(args).WithParsed(options =>
             {
+
+                if (options.EnableLogging)
+                {
+                    logger = new Logger();
+                }
+
                 var analyzer = new Analyzer();
                 if (!string.IsNullOrWhiteSpace(options.XmlPath))
                 {
@@ -30,29 +38,51 @@ namespace tripled
                     {
                         string logEntry = string.Format("Detected {0} files.", filesToAnalyze.Count);
 
-                        if (options.EnableLogging)
-                        {
-                            logger = new Logger();
-                            logger.Log(logEntry);
-                        }
+                        OutputLog(logger, options.EnableLogging, logEntry);
 
-                        Console.WriteLine(logEntry);
-                        
-                        foreach(var file in filesToAnalyze)
+                        foreach (var file in filesToAnalyze)
                         {
                             logEntry = string.Format("Analyzing file: {0}", file);
 
-                            if(options.EnableLogging)
-                            {
-                                logger.Log(logEntry);
-                            }
-
-                            Console.WriteLine(logEntry);
+                            OutputLog(logger, options.EnableLogging, logEntry);
 
                             var xml = XDocument.Load(file);
 
                             // We need to parse out in the following member hierarchy:
                             // Type -> Members -> Member -> MemberSignature (Language=DocId) -> Value
+
+                            var elementSet = xml.Root.XPathSelectElements("/Type/Members/Member");
+                            foreach(var element in elementSet)
+                            {
+                                var targetSignature = element.Descendants("MemberSignature").FirstOrDefault(el => el.Attribute("Language").Value == "DocId").Attribute("Value").Value;
+
+                                logEntry = string.Format("De-duping signature: {0}", targetSignature);
+                                OutputLog(logger, options.EnableLogging, logEntry);
+
+                                var dupedElements = from xe
+                                                    in elementSet
+                                                    where xe.Descendants("MemberSignature").FirstOrDefault(el => el.Attribute("Language").Value == "DocId" &&
+                                                                                                           el.Attribute("Value").Value == targetSignature) != null
+                                                    select xe;
+
+                                logEntry = string.Format("Elements with matching signature: {0}", dupedElements.Count());
+                                OutputLog(logger, options.EnableLogging, logEntry);
+
+                                if (dupedElements.Count() == 1)
+                                {
+                                    logEntry = string.Format("{0} is CLEAN", targetSignature);
+                                    OutputLog(logger, options.EnableLogging, logEntry);
+                                }
+                                else
+                                {
+                                    logEntry = string.Format("{0} is DIRTY", targetSignature);
+                                    OutputLog(logger, options.EnableLogging, logEntry);
+
+                                    var elementsToRemove = analyzer.PickLosingElements(dupedElements);
+                                }
+                            }
+
+                            Logger.InternalLog(string.Format("Individual members in the type: {0}", elementSet.Count()));
                         }
 
                     }
@@ -60,6 +90,16 @@ namespace tripled
             });
             
             Console.ReadKey();
+        }
+
+        static void OutputLog(Logger logger, bool shouldLog, string logEntry)
+        {
+            if (shouldLog)
+            {
+                logger.Log(logEntry);
+            }
+
+            Console.WriteLine(logEntry);
         }
     }
 }
