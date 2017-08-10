@@ -48,6 +48,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Kernel\Analyzer.cs" />
+    <Compile Include="Kernel\Logger.cs" />
     <Compile Include="Models\CommandLineOptions.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
