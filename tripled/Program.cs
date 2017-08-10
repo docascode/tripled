@@ -23,7 +23,10 @@ namespace tripled
                     // CommandLineParser will automatically throw an error.
 
                     List<string> filesToAnalyze = new List<string>(analyzer.GetFilesToAnalyze(options.XmlPath));
+                    if (filesToAnalyze.Count > 0)
+                    {
 
+                    }
                 }
             });
             
