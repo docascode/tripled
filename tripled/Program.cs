@@ -1,6 +1,7 @@
 ﻿using CommandLine;
 using System;
 using System.Collections.Generic;
+using System.Xml.Linq;
 using tripled.Kernel;
 using tripled.Models;
 
@@ -47,6 +48,11 @@ namespace tripled
                             }
 
                             Console.WriteLine(logEntry);
+
+                            var xml = XDocument.Load(file);
+
+                            // We need to parse out in the following member hierarchy:
+                            // Type -> Members -> Member -> MemberSignature (Language=DocId) -> Value
                         }
 
                     }
