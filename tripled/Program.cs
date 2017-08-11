@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Xml;
 using System.Xml.Linq;
 using System.Xml.XPath;
 using tripled.Kernel;
@@ -47,14 +48,17 @@ namespace tripled
                             OutputLog(logger, options.EnableLogging, logEntry);
 
                             var xml = XDocument.Load(file);
+                            //var test = xml.Root.Descendants("Member");
+                            //Logger.InternalLog(xml.ToString());
 
                             // We need to parse out in the following member hierarchy:
                             // Type -> Members -> Member -> MemberSignature (Language=DocId) -> Value
 
                             var elementSet = xml.Root.XPathSelectElements("/Type/Members/Member");
-                            foreach(var element in elementSet)
+                            List<XElement> elementsToRemove = new List<XElement>();
+                            for(int i = 0; i< elementSet.Count(); i++)
                             {
-                                var targetSignature = element.Descendants("MemberSignature").FirstOrDefault(el => el.Attribute("Language").Value == "DocId").Attribute("Value").Value;
+                                var targetSignature = elementSet.ElementAt(i).Descendants("MemberSignature").FirstOrDefault(el => el.Attribute("Language").Value == "DocId").Attribute("Value").Value;
 
                                 logEntry = string.Format("De-duping signature: {0}", targetSignature);
                                 OutputLog(logger, options.EnableLogging, logEntry);
@@ -78,8 +82,26 @@ namespace tripled
                                     logEntry = string.Format("{0} is DIRTY", targetSignature);
                                     OutputLog(logger, options.EnableLogging, logEntry);
 
-                                    var elementsToRemove = analyzer.PickLosingElements(dupedElements);
+                                    elementsToRemove.AddRange(analyzer.PickLosingElements(dupedElements));
                                 }
+
+                                if (elementsToRemove != null && elementsToRemove.Count > 0)
+                                {
+                                    foreach (var removableElement in elementsToRemove)
+                                    {
+                                        var element = from e in xml.Root.Descendants("Member")
+                                                      where XNode.DeepEquals(e, removableElement)
+                                                      select e;
+
+                                        element.Remove();
+                                    }
+                                }
+                            }
+
+                            XmlWriterSettings xws = new XmlWriterSettings { OmitXmlDeclaration = true, Indent = true };
+                            using (XmlWriter xw = XmlWriter.Create(file, xws))
+                            {
+                                xml.Save(xw);
                             }
 
                             Logger.InternalLog(string.Format("Individual members in the type: {0}", elementSet.Count()));
