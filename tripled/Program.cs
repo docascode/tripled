@@ -48,11 +48,6 @@ namespace tripled
                             OutputLog(logger, options.EnableLogging, logEntry);
 
                             var xml = XDocument.Load(file);
-                            //var test = xml.Root.Descendants("Member");
-                            //Logger.InternalLog(xml.ToString());
-
-                            // We need to parse out in the following member hierarchy:
-                            // Type -> Members -> Member -> MemberSignature (Language=DocId) -> Value
 
                             var elementSet = xml.Root.XPathSelectElements("/Type/Members/Member");
                             List<XElement> elementsToRemove = new List<XElement>();
@@ -98,6 +93,9 @@ namespace tripled
                                 }
                             }
 
+                            // Ensures we are not publishing duplicated content.
+                            ProcessDupeContent(xml);
+
                             XmlWriterSettings xws = new XmlWriterSettings { OmitXmlDeclaration = true, Indent = true };
                             using (XmlWriter xw = XmlWriter.Create(file, xws))
                             {
@@ -120,6 +118,55 @@ namespace tripled
             }
 
             Console.WriteLine(logEntry);
+        }
+
+        static void ProcessDupeContent(XDocument doc)
+        {
+            var descendants = doc.Descendants("Docs");
+            HashSet<string> contentAnalyzed = new HashSet<string>();
+
+            // Each entity here is a <docs></docs> node that we need to validate.
+            foreach (var el in descendants)
+            {
+                // Elements grouped by their type.
+                var groupedElements = el.Elements().GroupBy(g => g.Name.LocalName.ToString());
+
+                // Iterate through each group individually.
+                foreach (var element in groupedElements)
+                {
+                    Console.WriteLine("Elements in " + element.Key + " sequence: " + element.Count());
+
+                    // This will iterate through each element in the group.
+                    foreach (var partOfGroup in element)
+                    {
+                        var targetContent = partOfGroup.ToString();
+
+                        if (contentAnalyzed.Contains(targetContent))
+                        {
+                            continue;
+                        }
+                        else
+                        {
+                            contentAnalyzed.Add(targetContent);
+                        }
+
+                        var nodesMatching = from x in element where x.ToString() == targetContent select x;
+
+                        // There are dupe elements within the same <docs></docs> node.
+                        // These need to be removed.
+                        if (nodesMatching != null && nodesMatching.Count() > 1)
+                        {
+                            var matches = nodesMatching.Count();
+
+                            for (int i = 0; i < matches - 1; i++)
+                            {
+                                el.Elements().First(x => x.ToString() == targetContent).Remove();
+                            }
+                        }
+                    }
+                    contentAnalyzed.Clear();
+                }
+            }
         }
     }
 }
