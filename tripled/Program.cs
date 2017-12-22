@@ -110,8 +110,6 @@ namespace tripled
                     }
                 }
             });
-            
-            Console.Read();
         }
 
         static void OutputLog(Logger logger, bool shouldLog, string logEntry)
