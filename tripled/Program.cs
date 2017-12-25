@@ -125,6 +125,9 @@ namespace tripled
             var descendants = doc.Descendants("Docs");
             HashSet<string> contentAnalyzed = new HashSet<string>();
 
+            // Keep track of nodes in which need to only keep one element.
+            string[] unaryElements = new string[] { "summary" };
+
             // Each entity here is a <docs></docs> node that we need to validate.
             foreach (var el in descendants)
             {
@@ -134,7 +137,20 @@ namespace tripled
                 // Iterate through each group individually.
                 foreach (var element in groupedElements)
                 {
-                    Console.WriteLine("Elements in " + element.Key + " sequence: " + element.Count());
+                    int sequenceCount = element.Count();
+                    Console.WriteLine("Elements in " + element.Key + " sequence: " + sequenceCount);
+
+                    if (sequenceCount > 1 && unaryElements.Contains(element.Key))
+                    {
+                        // An element was detected that should be one, but is in several instances.
+
+                        for (int i = 1; i < sequenceCount; i++)
+                        {
+                            // Skip first element, remove the rest.
+                            var selectedElement = element.ElementAt(i);
+                            selectedElement.Remove();
+                        }
+                    }
 
                     // This will iterate through each element in the group.
                     foreach (var partOfGroup in element)
