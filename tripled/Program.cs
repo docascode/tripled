@@ -142,7 +142,7 @@ namespace tripled
                     // This will iterate through each element in the group.
                     foreach (var partOfGroup in element)
                     {
-                        var targetContent = partOfGroup.ToString();
+                        var targetContent = partOfGroup.ToString().ToLower().Replace("  ", " ");
 
                         if (contentAnalyzed.Contains(targetContent))
                         {
@@ -153,7 +153,7 @@ namespace tripled
                             contentAnalyzed.Add(targetContent);
                         }
 
-                        var nodesMatching = from x in element where x.ToString() == targetContent select x;
+                        var nodesMatching = from x in element where x.ToString().Replace("  ", " ").Equals(targetContent, StringComparison.CurrentCultureIgnoreCase) select x;
 
                         // There are dupe elements within the same <docs></docs> node.
                         // These need to be removed.
@@ -163,7 +163,7 @@ namespace tripled
 
                             for (int i = 0; i < matches - 1; i++)
                             {
-                                el.Elements().First(x => x.ToString() == targetContent).Remove();
+                                el.Elements().First(x => x.ToString().Replace("  ", " ").Equals(targetContent, StringComparison.CurrentCultureIgnoreCase)).Remove();
                             }
                         }
                     }
