@@ -1,6 +1,7 @@
 ﻿using CommandLine;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Xml;
 using System.Xml.Linq;
@@ -140,6 +141,9 @@ namespace tripled
                     int sequenceCount = element.Count();
                     Console.WriteLine("Elements in " + element.Key + " sequence: " + sequenceCount);
 
+                    if (element.ElementAt(0).Value.Contains("representation of the Microsoft Azure Table service. This client is used to configure and execute requests against"))
+                        Debug.WriteLine("TEST");
+
                     if (sequenceCount > 1 && unaryElements.Contains(element.Key))
                     {
                         // An element was detected that should be one, but is in several instances.
@@ -147,15 +151,19 @@ namespace tripled
                         for (int i = 1; i < sequenceCount; i++)
                         {
                             // Skip first element, remove the rest.
-                            var selectedElement = element.ElementAt(i);
-                            selectedElement.Remove();
+                            var x = el.Descendants(element.Key).Last();
+                            x.Remove();
                         }
+
+                        // For a given sequence, it's safe to assume that no other checks need to be done
+                        // because we don't support dupe content in it anyway.
+                        continue;
                     }
 
                     // This will iterate through each element in the group.
                     foreach (var partOfGroup in element)
                     {
-                        var targetContent = partOfGroup.ToString().ToLower().Replace("  ", " ");
+                        var targetContent = partOfGroup.ToString().ToLower().Replace("  ", " ").Trim();
 
                         if (contentAnalyzed.Contains(targetContent))
                         {
@@ -166,7 +174,7 @@ namespace tripled
                             contentAnalyzed.Add(targetContent);
                         }
 
-                        var nodesMatching = from x in element where x.ToString().Replace("  ", " ").Equals(targetContent, StringComparison.CurrentCultureIgnoreCase) select x;
+                        var nodesMatching = from x in element where x.ToString().Replace("  ", " ").Trim().Equals(targetContent, StringComparison.CurrentCultureIgnoreCase) select x;
 
                         // There are dupe elements within the same <docs></docs> node.
                         // These need to be removed.
@@ -176,7 +184,7 @@ namespace tripled
 
                             for (int i = 0; i < matches - 1; i++)
                             {
-                                el.Elements().First(x => x.ToString().Replace("  ", " ").Equals(targetContent, StringComparison.CurrentCultureIgnoreCase)).Remove();
+                                el.Elements().First(x => x.ToString().Replace("  ", " ").Trim().Equals(targetContent, StringComparison.CurrentCultureIgnoreCase)).Remove();
                             }
                         }
                     }
