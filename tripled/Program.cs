@@ -94,7 +94,6 @@ namespace tripled
                                 }
                             }
 
-                            // Ensures we are not publishing duplicated content.
                             ProcessDupeContent(xml);
 
                             XmlWriterSettings xws = new XmlWriterSettings { OmitXmlDeclaration = true, Indent = true };
@@ -151,7 +150,7 @@ namespace tripled
                         for (int i = 1; i < sequenceCount; i++)
                         {
                             // Skip first element, remove the rest.
-                            var x = el.Descendants(element.Key).Last();
+                            var x = el.Elements(element.Key).Last();
                             x.Remove();
                         }
 
