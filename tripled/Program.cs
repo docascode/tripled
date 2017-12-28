@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Xml;
 using System.Xml.Linq;
@@ -39,6 +40,17 @@ namespace tripled
                     if (filesToAnalyze.Count > 0)
                     {
                         string logEntry = string.Format("Detected {0} files.", filesToAnalyze.Count);
+
+                        // Build out the cache of DocIDs.
+                        var frameworkFiles = Directory.GetFiles(Path.Combine(options.XmlPath, "FrameworksIndex"), "*.xml", SearchOption.AllDirectories);
+                        List<string> docIdCache = new List<string>();
+
+                        foreach (var file in frameworkFiles)
+                        {
+                            XDocument frameworkFile = XDocument.Load(file);
+                            var docIds = from c in frameworkFile.Descendants() where c.Attribute("Id") != null select c.Attribute("Id").Value;
+                            docIdCache.AddRange(docIds);
+                        }
 
                         OutputLog(logger, options.EnableLogging, logEntry);
 
@@ -96,10 +108,18 @@ namespace tripled
 
                             ProcessDupeContent(xml);
 
-                            XmlWriterSettings xws = new XmlWriterSettings { OmitXmlDeclaration = true, Indent = true };
-                            using (XmlWriter xw = XmlWriter.Create(file, xws))
+                            var shouldDelete = PerformFrameworkValidation(xml, docIdCache);
+                            if (!shouldDelete)
                             {
-                                xml.Save(xw);
+                                XmlWriterSettings xws = new XmlWriterSettings { OmitXmlDeclaration = true, Indent = true };
+                                using (XmlWriter xw = XmlWriter.Create(file, xws))
+                                {
+                                    xml.Save(xw);
+                                }
+                            }
+                            else
+                            {
+                                File.Delete(file);
                             }
 
                             Logger.InternalLog(string.Format("Individual members in the type: {0}", elementSet.Count()));
@@ -108,6 +128,54 @@ namespace tripled
                     }
                 }
             });
+        }
+
+        /// <summary>
+        /// Performs validation against the mdoc-generated framework files.
+        /// </summary>
+        /// <param name="fileName">Path to XML document containing API information.</param>
+        /// <param name="pathToFrameworks">Path to FrameworksIndex.</param>
+        static bool PerformFrameworkValidation(XDocument doc, IEnumerable<string> cache)
+        {
+            var setOfDocIDs = from c in doc.Root.Descendants() where c.Attribute("Language") != null && ((string)c.Attribute("Language")).Equals("DocId", StringComparison.CurrentCultureIgnoreCase) select c;
+            
+            List<XElement> elementsToRemove = new List<XElement>();
+
+            foreach (var docIdElement in setOfDocIDs)
+            {
+                string targetLookupDocId = (string)docIdElement.Attribute("Value");
+
+                if (cache.Contains(targetLookupDocId, StringComparer.InvariantCultureIgnoreCase))
+                {
+                    if (elementsToRemove.Contains(docIdElement))
+                        elementsToRemove.Remove(docIdElement);
+                }
+                else
+                {
+                    elementsToRemove.Add(docIdElement);
+                }
+            }
+
+            if (elementsToRemove.Any())
+            {
+                for (int i = elementsToRemove.Count - 1; i > -1; i--)
+                {
+                    if (elementsToRemove[i].Name.LocalName.Equals("Type", StringComparison.CurrentCultureIgnoreCase))
+                    {
+                        return true;
+                    }
+                    else
+                    {
+                        elementsToRemove[i].Parent.Remove();
+                    }
+                }
+
+                doc.Descendants()
+                   .Where(a => a.IsEmpty && String.IsNullOrWhiteSpace(a.Value) && !a.Attributes().Any())
+                   .Remove();
+            }
+
+            return false;
         }
 
         static void OutputLog(Logger logger, bool shouldLog, string logEntry)
