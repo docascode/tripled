@@ -1,9 +1,9 @@
 ﻿using CommandLine;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Xml;
 using System.Xml.Linq;
 using System.Xml.XPath;
@@ -12,22 +12,18 @@ using tripled.Models;
 
 namespace tripled
 {
-    class Program
+    internal class Program
     {
-        static void Main(string[] args)
+        private static void Main(string[] args)
         {
-            string version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
+            var version = Assembly.GetExecutingAssembly().GetName().Version.ToString();
             Logger logger = null;
 
-            Console.WriteLine(string.Format("Document De-Duper | Build Version: {0}", version));
+            Console.WriteLine("Document De-Duper | Build Version: {0}", version);
 
             Parser.Default.ParseArguments<CommandLineOptions>(args).WithParsed(options =>
             {
-
-                if (options.EnableLogging)
-                {
-                    logger = new Logger();
-                }
+                if (options.EnableLogging) logger = new Logger();
 
                 var analyzer = new Analyzer();
                 if (!string.IsNullOrWhiteSpace(options.XmlPath))
@@ -36,114 +32,122 @@ namespace tripled
                     // NOTE: There is no need to error out if there is no XML path specified because
                     // CommandLineParser will automatically throw an error.
 
-                    List<string> filesToAnalyze = new List<string>(analyzer.GetFilesToAnalyze(options.XmlPath));
-                    if (filesToAnalyze.Count > 0)
+                    var filesToAnalyze = new List<string>(analyzer.GetFilesToAnalyze(options.XmlPath));
+                    if (filesToAnalyze.Count <= 0) return;
+                    var logEntry = $"Detected {filesToAnalyze.Count} files.";
+
+                    // Build out the cache of DocIDs.
+                    var frameworkFiles = Directory.GetFiles(Path.Combine(options.XmlPath, "FrameworksIndex"),
+                        "*.xml", SearchOption.AllDirectories);
+                    var docIdCache = new List<string>();
+
+                    foreach (var file in frameworkFiles)
                     {
-                        string logEntry = string.Format("Detected {0} files.", filesToAnalyze.Count);
+                        var frameworkFile = XDocument.Load(file);
+                        var docIds = from c in frameworkFile.Descendants()
+                            where c.Attribute("Id") != null
+                            select c.Attribute("Id")?.Value;
+                        docIdCache.AddRange(docIds);
+                    }
 
-                        // Build out the cache of DocIDs.
-                        var frameworkFiles = Directory.GetFiles(Path.Combine(options.XmlPath, "FrameworksIndex"), "*.xml", SearchOption.AllDirectories);
-                        List<string> docIdCache = new List<string>();
+                    OutputLog(logger, options.EnableLogging, logEntry);
 
-                        foreach (var file in frameworkFiles)
-                        {
-                            XDocument frameworkFile = XDocument.Load(file);
-                            var docIds = from c in frameworkFile.Descendants() where c.Attribute("Id") != null select c.Attribute("Id").Value;
-                            docIdCache.AddRange(docIds);
-                        }
+                    foreach (var file in filesToAnalyze)
+                    {
+                        logEntry = $"Analyzing file: {file}";
 
                         OutputLog(logger, options.EnableLogging, logEntry);
 
-                        foreach (var file in filesToAnalyze)
-                        {
-                            logEntry = string.Format("Analyzing file: {0}", file);
+                        var xml = XDocument.Load(file);
 
+                        if (xml.Root == null) continue;
+                        var elementSet = xml.Root.XPathSelectElements("/Type/Members/Member");
+                        var elementsToRemove = new List<XElement>();
+                        for (var i = 0; i < elementSet.Count(); i++)
+                        {
+                            var targetSignature = elementSet.ElementAt(i).Descendants("MemberSignature")
+                                .FirstOrDefault(el => el.Attribute("Language")?.Value == "DocId")
+                                ?.Attribute("Value")
+                                .Value;
+
+                            logEntry = $"De-duping signature: {targetSignature}";
                             OutputLog(logger, options.EnableLogging, logEntry);
 
-                            var xml = XDocument.Load(file);
+                            var dupedElements = from xe
+                                    in elementSet
+                                where xe.Descendants("MemberSignature").FirstOrDefault(el =>
+                                          el.Attribute("Language")?.Value == "DocId" &&
+                                          el.Attribute("Value")?.Value == targetSignature) != null
+                                select xe;
 
-                            var elementSet = xml.Root.XPathSelectElements("/Type/Members/Member");
-                            List<XElement> elementsToRemove = new List<XElement>();
-                            for(int i = 0; i< elementSet.Count(); i++)
+                            logEntry = $"Elements with matching signature: {dupedElements.Count()}";
+                            OutputLog(logger, options.EnableLogging, logEntry);
+
+                            if (dupedElements.Count() == 1)
                             {
-                                var targetSignature = elementSet.ElementAt(i).Descendants("MemberSignature").FirstOrDefault(el => el.Attribute("Language").Value == "DocId").Attribute("Value").Value;
-
-                                logEntry = string.Format("De-duping signature: {0}", targetSignature);
+                                logEntry = $"{targetSignature} is CLEAN";
                                 OutputLog(logger, options.EnableLogging, logEntry);
-
-                                var dupedElements = from xe
-                                                    in elementSet
-                                                    where xe.Descendants("MemberSignature").FirstOrDefault(el => el.Attribute("Language").Value == "DocId" &&
-                                                                                                           el.Attribute("Value").Value == targetSignature) != null
-                                                    select xe;
-
-                                logEntry = string.Format("Elements with matching signature: {0}", dupedElements.Count());
-                                OutputLog(logger, options.EnableLogging, logEntry);
-
-                                if (dupedElements.Count() == 1)
-                                {
-                                    logEntry = string.Format("{0} is CLEAN", targetSignature);
-                                    OutputLog(logger, options.EnableLogging, logEntry);
-                                }
-                                else
-                                {
-                                    logEntry = string.Format("{0} is DIRTY", targetSignature);
-                                    OutputLog(logger, options.EnableLogging, logEntry);
-
-                                    elementsToRemove.AddRange(analyzer.PickLosingElements(dupedElements));
-                                }
-
-                                if (elementsToRemove != null && elementsToRemove.Count > 0)
-                                {
-                                    foreach (var removableElement in elementsToRemove)
-                                    {
-                                        var element = from e in xml.Root.Descendants("Member")
-                                                      where XNode.DeepEquals(e, removableElement)
-                                                      select e;
-
-                                        element.Remove();
-                                    }
-                                }
-                            }
-
-                            ProcessDupeContent(xml);
-
-                            var shouldDelete = PerformFrameworkValidation(xml, docIdCache);
-                            if (!shouldDelete)
-                            {
-                                XmlWriterSettings xws = new XmlWriterSettings { OmitXmlDeclaration = true, Indent = true };
-                                using (XmlWriter xw = XmlWriter.Create(file, xws))
-                                {
-                                    xml.Save(xw);
-                                }
                             }
                             else
                             {
-                                File.Delete(file);
+                                logEntry = $"{targetSignature} is DIRTY";
+                                OutputLog(logger, options.EnableLogging, logEntry);
+
+                                elementsToRemove.AddRange(analyzer.PickLosingElements(dupedElements));
                             }
 
-                            Logger.InternalLog(string.Format("Individual members in the type: {0}", elementSet.Count()));
+                            if (!elementsToRemove.Any()) continue;
+                            foreach (var removableElement in elementsToRemove)
+                            {
+                                var element = from e in xml.Root.Descendants("Member")
+                                    where XNode.DeepEquals(e, removableElement)
+                                    select e;
+
+                                element.Remove();
+                            }
                         }
 
+                        ProcessDupeContent(xml);
+
+                        var shouldDelete = PerformFrameworkValidation(xml, docIdCache);
+                        if (!shouldDelete)
+                        {
+                            var xws = new XmlWriterSettings {OmitXmlDeclaration = true, Indent = true};
+                            using (var xw = XmlWriter.Create(file, xws))
+                            {
+                                xml.Save(xw);
+                            }
+                        }
+                        else
+                        {
+                            File.Delete(file);
+                        }
+
+                        Logger.InternalLog($"Individual members in the type: {elementSet.Count()}");
                     }
                 }
             });
         }
 
         /// <summary>
-        /// Performs validation against the mdoc-generated framework files.
+        ///     Performs validation against the mdoc-generated framework files.
         /// </summary>
-        /// <param name="fileName">Path to XML document containing API information.</param>
-        /// <param name="pathToFrameworks">Path to FrameworksIndex.</param>
-        static bool PerformFrameworkValidation(XDocument doc, IEnumerable<string> cache)
+        private static bool PerformFrameworkValidation(XDocument doc, IEnumerable<string> cache)
         {
-            var setOfDocIDs = from c in doc.Root.Descendants() where c.Attribute("Language") != null && ((string)c.Attribute("Language")).Equals("DocId", StringComparison.CurrentCultureIgnoreCase) select c;
-            
-            List<XElement> elementsToRemove = new List<XElement>();
+            if (doc == null) throw new ArgumentNullException(nameof(doc));
+            if (cache == null) throw new ArgumentNullException(nameof(cache));
+
+            if (doc.Root == null) return false;
+            var setOfDocIDs = from c in doc.Root.Descendants()
+                where c.Attribute("Language") != null &&
+                      ((string) c.Attribute("Language")).Equals("DocId", StringComparison.CurrentCultureIgnoreCase)
+                select c;
+
+            var elementsToRemove = new List<XElement>();
 
             foreach (var docIdElement in setOfDocIDs)
             {
-                string targetLookupDocId = (string)docIdElement.Attribute("Value");
+                var targetLookupDocId = (string) docIdElement.Attribute("Value");
 
                 if (cache.Contains(targetLookupDocId, StringComparer.InvariantCultureIgnoreCase))
                 {
@@ -156,45 +160,36 @@ namespace tripled
                 }
             }
 
-            if (elementsToRemove.Any())
-            {
-                for (int i = elementsToRemove.Count - 1; i > -1; i--)
-                {
-                    if (elementsToRemove[i].Name.LocalName.Equals("Type", StringComparison.CurrentCultureIgnoreCase))
-                    {
-                        return true;
-                    }
-                    else
-                    {
-                        elementsToRemove[i].Parent.Remove();
-                    }
-                }
+            if (!elementsToRemove.Any()) return false;
+            for (var i = elementsToRemove.Count - 1; i > -1; i--)
+                if (elementsToRemove[i].Name.LocalName.Equals("Type", StringComparison.CurrentCultureIgnoreCase))
+                    return true;
+                else
+                    elementsToRemove[i].Parent?.Remove();
 
-                doc.Descendants()
-                   .Where(a => a.IsEmpty && String.IsNullOrWhiteSpace(a.Value) && !a.Attributes().Any())
-                   .Remove();
-            }
+            doc.Descendants()
+                .Where(a => a.IsEmpty && string.IsNullOrWhiteSpace(a.Value) && !a.Attributes().Any())
+                .Remove();
 
             return false;
         }
 
-        static void OutputLog(Logger logger, bool shouldLog, string logEntry)
+        private static void OutputLog(Logger logger, bool shouldLog, string logEntry)
         {
-            if (shouldLog)
-            {
-                logger.Log(logEntry);
-            }
+            if (shouldLog) logger.Log(logEntry);
 
             Console.WriteLine(logEntry);
         }
 
-        static void ProcessDupeContent(XDocument doc)
+        private static void ProcessDupeContent(XDocument doc)
         {
+            if (doc == null) throw new ArgumentNullException(nameof(doc));
+
             var descendants = doc.Descendants("Docs");
-            HashSet<string> contentAnalyzed = new HashSet<string>();
+            var contentAnalyzed = new HashSet<string>();
 
             // Keep track of nodes in which need to only keep one element.
-            string[] unaryElements = new string[] { "summary" };
+            string[] unaryElements = {"summary"};
 
             // Each entity here is a <docs></docs> node that we need to validate.
             foreach (var el in descendants)
@@ -205,17 +200,14 @@ namespace tripled
                 // Iterate through each group individually.
                 foreach (var element in groupedElements)
                 {
-                    int sequenceCount = element.Count();
+                    var sequenceCount = element.Count();
                     Console.WriteLine("Elements in " + element.Key + " sequence: " + sequenceCount);
-
-                    if (element.ElementAt(0).Value.Contains("representation of the Microsoft Azure Table service. This client is used to configure and execute requests against"))
-                        Debug.WriteLine("TEST");
 
                     if (sequenceCount > 1 && unaryElements.Contains(element.Key))
                     {
                         // An element was detected that should be one, but is in several instances.
 
-                        for (int i = 1; i < sequenceCount; i++)
+                        for (var i = 1; i < sequenceCount; i++)
                         {
                             // Skip first element, remove the rest.
                             var x = el.Elements(element.Key).Last();
@@ -233,28 +225,25 @@ namespace tripled
                         var targetContent = partOfGroup.ToString().ToLower().Replace("  ", " ").Trim();
 
                         if (contentAnalyzed.Contains(targetContent))
-                        {
                             continue;
-                        }
-                        else
-                        {
-                            contentAnalyzed.Add(targetContent);
-                        }
+                        contentAnalyzed.Add(targetContent);
 
-                        var nodesMatching = from x in element where x.ToString().Replace("  ", " ").Trim().Equals(targetContent, StringComparison.CurrentCultureIgnoreCase) select x;
+                        var nodesMatching = from x in element
+                            where x.ToString().Replace("  ", " ").Trim().Equals(targetContent,
+                                StringComparison.CurrentCultureIgnoreCase)
+                            select x;
 
                         // There are dupe elements within the same <docs></docs> node.
                         // These need to be removed.
-                        if (nodesMatching != null && nodesMatching.Count() > 1)
-                        {
-                            var matches = nodesMatching.Count();
+                        if (nodesMatching.Count() <= 1) continue;
+                        var matches = nodesMatching.Count();
 
-                            for (int i = 0; i < matches - 1; i++)
-                            {
-                                el.Elements().First(x => x.ToString().Replace("  ", " ").Trim().Equals(targetContent, StringComparison.CurrentCultureIgnoreCase)).Remove();
-                            }
-                        }
+                        for (var i = 0; i < matches - 1; i++)
+                            el.Elements().First(x =>
+                                x.ToString().Replace("  ", " ").Trim().Equals(targetContent,
+                                    StringComparison.CurrentCultureIgnoreCase)).Remove();
                     }
+
                     contentAnalyzed.Clear();
                 }
             }
