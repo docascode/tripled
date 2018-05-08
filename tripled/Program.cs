@@ -119,8 +119,11 @@ namespace tripled
                                 {
                                     xml.Save(xw);
                                 }
-                                catch
+                                catch (Exception ex)
                                 {
+                                    Console.WriteLine(ex.Message);
+                                    Console.WriteLine("Target file: " + file);
+                                    Console.WriteLine("Contents of the failed file:");
                                     Console.WriteLine(xml.ToString());
                                 }
                             }
@@ -134,8 +137,6 @@ namespace tripled
                     }
                 }
             });
-
-            Console.ReadKey();
         }
 
         /// <summary>
