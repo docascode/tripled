@@ -115,7 +115,14 @@ namespace tripled
                             var xws = new XmlWriterSettings {OmitXmlDeclaration = true, Indent = true};
                             using (var xw = XmlWriter.Create(file, xws))
                             {
-                                xml.Save(xw);
+                                try
+                                {
+                                    xml.Save(xw);
+                                }
+                                catch
+                                {
+                                    Console.WriteLine(xml.ToString());
+                                }
                             }
                         }
                         else
@@ -127,6 +134,8 @@ namespace tripled
                     }
                 }
             });
+
+            Console.ReadKey();
         }
 
         /// <summary>
