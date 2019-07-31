@@ -235,7 +235,7 @@ namespace tripled
                     // This will iterate through each element in the group.
                     foreach (var partOfGroup in element)
                     {
-                        var targetContent = partOfGroup.ToString().ToLower().Replace("  ", " ").Trim();
+                        var targetContent = partOfGroup.ToString().Replace("  ", " ").Trim();
 
                         if (contentAnalyzed.Contains(targetContent))
                             continue;
@@ -243,7 +243,7 @@ namespace tripled
 
                         var nodesMatching = from x in element
                             where x.ToString().Replace("  ", " ").Trim().Equals(targetContent,
-                                StringComparison.CurrentCultureIgnoreCase)
+                                StringComparison.CurrentCulture)
                             select x;
 
                         // There are dupe elements within the same <docs></docs> node.
@@ -254,7 +254,7 @@ namespace tripled
                         for (var i = 0; i < matches - 1; i++)
                             el.Elements().First(x =>
                                 x.ToString().Replace("  ", " ").Trim().Equals(targetContent,
-                                    StringComparison.CurrentCultureIgnoreCase)).Remove();
+                                    StringComparison.CurrentCulture)).Remove();
                     }
 
                     contentAnalyzed.Clear();
