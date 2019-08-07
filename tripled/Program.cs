@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
 using System.Xml.XPath;
@@ -68,85 +69,97 @@ namespace tripled
                     }
                 }
 
-                foreach (var file in filesToAnalyze)
+                Parallel.ForEach(filesToAnalyze, file =>
                 {
-                    logger.Log($"Analyzing file: {file}");
-
-                    var xml = XDocument.Load(file);
-
-                    if (xml.Root == null) continue;
-                    var elementSet = xml.Root.XPathSelectElements("/Type/Members/Member");
-                    var elementsToRemove = new List<XElement>();
-                    for (var i = 0; i < elementSet.Count(); i++)
+                    try
                     {
-                        var targetSignature = elementSet.ElementAt(i).Descendants("MemberSignature")
-                            .FirstOrDefault(el => el.Attribute("Language")?.Value == "DocId")
-                            ?.Attribute("Value")
-                            .Value;
-                        logger.Log($"De-duping signature: {targetSignature}", TraceLevel.Verbose);
-
-                        var dupedElements = from xe
-                                in elementSet
-                                            where xe.Descendants("MemberSignature").FirstOrDefault(el =>
-                                                      el.Attribute("Language")?.Value == "DocId" &&
-                                                      el.Attribute("Value")?.Value == targetSignature) != null
-                                            select xe;
-
-                        
-                        var logEntry = $"Elements with matching signature: {dupedElements.Count()}";
-                        if (dupedElements.Count() == 1)
-                        {
-                            logEntry += $", {targetSignature} is CLEAN";
-                            logger.Log(logEntry, TraceLevel.Verbose);
-                        }
-                        else
-                        {
-                            logEntry += $", {targetSignature} is DIRTY";
-                            logger.Log(logEntry, TraceLevel.Warning);
-
-                            elementsToRemove.AddRange(analyzer.PickLosingElements(dupedElements));
-                        }
-
-                        if (!elementsToRemove.Any()) continue;
-                        foreach (var removableElement in elementsToRemove)
-                        {
-                            var element = from e in xml.Root.Descendants("Member")
-                                          where XNode.DeepEquals(e, removableElement)
-                                          select e;
-
-                            element.Remove();
-                        }
+                        AnalyzeOneFile(file, logger, analyzer, docIdCache);
                     }
-
-                    ProcessDupeContent(xml);
-
-                    var shouldDelete = PerformFrameworkValidation(xml, docIdCache);
-                    if (!shouldDelete)
+                    catch (Exception ex)
                     {
-                        var xws = new XmlWriterSettings { OmitXmlDeclaration = true, Indent = true };
-                        using (var xw = XmlWriter.Create(file, xws))
-                        {
-                            try
-                            {
-                                xml.Save(xw);
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine(ex.Message);
-                                Console.WriteLine("Target file: " + file);
-                                Console.WriteLine("Contents of the failed file:");
-                                Console.WriteLine(xml.ToString());
-                            }
-                        }
+                        logger.Log($"Failed to analyze file {file}: {ex.ToString()}", TraceLevel.Error);
                     }
-                    else
-                    {
-                        File.Delete(file);
-                    }
+                });
+            }
+        }
 
-                    Logger.InternalLog($"Individual members in the type: {elementSet.Count()}");
+        private static void AnalyzeOneFile(string file, Logger logger, Analyzer analyzer, HashSet<string> docIdCache)
+        {
+            logger.Log($"Analyzing file: {file}", TraceLevel.Verbose);
+
+            var xml = XDocument.Load(file);
+
+            if (xml.Root == null) return;
+            var elementSet = xml.Root.XPathSelectElements("/Type/Members/Member");
+            var elementsToRemove = new List<XElement>();
+            for (var i = 0; i < elementSet.Count(); i++)
+            {
+                var targetSignature = elementSet.ElementAt(i).Descendants("MemberSignature")
+                    .FirstOrDefault(el => el.Attribute("Language")?.Value == "DocId")
+                    ?.Attribute("Value")
+                    .Value;
+                logger.Log($"De-duping signature: {targetSignature}", TraceLevel.Verbose);
+
+                var dupedElements = from xe
+                        in elementSet
+                                    where xe.Descendants("MemberSignature").FirstOrDefault(el =>
+                                              el.Attribute("Language")?.Value == "DocId" &&
+                                              el.Attribute("Value")?.Value == targetSignature) != null
+                                    select xe;
+
+
+                var logEntry = $"Elements with matching signature: {dupedElements.Count()}";
+                if (dupedElements.Count() == 1)
+                {
+                    logEntry += $", {targetSignature} is CLEAN";
+                    logger.Log(logEntry, TraceLevel.Verbose);
+                }
+                else
+                {
+                    logEntry += $", {targetSignature} is DIRTY";
+                    logger.Log(logEntry, TraceLevel.Warning);
+
+                    elementsToRemove.AddRange(analyzer.PickLosingElements(dupedElements));
+                }
+
+                if (!elementsToRemove.Any()) continue;
+                foreach (var removableElement in elementsToRemove)
+                {
+                    var element = from e in xml.Root.Descendants("Member")
+                                  where XNode.DeepEquals(e, removableElement)
+                                  select e;
+
+                    element.Remove();
                 }
             }
+
+            ProcessDupeContent(xml);
+
+            var shouldDelete = PerformFrameworkValidation(xml, docIdCache);
+            if (!shouldDelete)
+            {
+                var xws = new XmlWriterSettings { OmitXmlDeclaration = true, Indent = true };
+                using (var xw = XmlWriter.Create(file, xws))
+                {
+                    try
+                    {
+                        xml.Save(xw);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine(ex.Message);
+                        Console.WriteLine("Target file: " + file);
+                        Console.WriteLine("Contents of the failed file:");
+                        Console.WriteLine(xml.ToString());
+                    }
+                }
+            }
+            else
+            {
+                File.Delete(file);
+            }
+
+            Logger.InternalLog($"Individual members in the type: {elementSet.Count()}");
         }
 
         /// <summary>
