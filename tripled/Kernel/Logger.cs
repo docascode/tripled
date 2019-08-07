@@ -29,8 +29,12 @@ namespace tripled.Kernel
             Debug.WriteLine(string.Format("{0}: {1}", stackTrace.GetFrame(1).GetMethod().Name, logEntry));
         }
 
-        internal void Log(string logEntry, TraceLevel level = TraceLevel.Info)
+        internal void Log(string logEntry, string fileName = null, TraceLevel level = TraceLevel.Info)
         {
+            if (!string.IsNullOrEmpty(fileName))
+            {
+                logEntry = $"{fileName}: {logEntry}";
+            }
             if (level <= _traceLevel)
             {
                 if (_writeToFile)
@@ -46,6 +50,7 @@ namespace tripled.Kernel
             if (_writeToFile)
             {
                 File.WriteAllText(CurrentLogFile, _sb.ToString());
+                Console.WriteLine($"Log written to {CurrentLogFile}.");
             }
         }
     }

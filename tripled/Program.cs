@@ -77,7 +77,7 @@ namespace tripled
                     }
                     catch (Exception ex)
                     {
-                        logger.Log($"Failed to analyze file {file}: {ex.ToString()}", TraceLevel.Error);
+                        logger.Log($"Failed to analyze: {ex.ToString()}", file, TraceLevel.Error);
                     }
                 });
             }
@@ -85,9 +85,10 @@ namespace tripled
 
         private static void AnalyzeOneFile(string file, Logger logger, Analyzer analyzer, HashSet<string> docIdCache)
         {
-            logger.Log($"Analyzing file: {file}", TraceLevel.Verbose);
+            logger.Log($"Analyzing...", file, TraceLevel.Verbose);
 
             var xml = XDocument.Load(file);
+            var fileDirty = false;
 
             if (xml.Root == null) return;
             var elementSet = xml.Root.XPathSelectElements("/Type/Members/Member");
@@ -98,7 +99,6 @@ namespace tripled
                     .FirstOrDefault(el => el.Attribute("Language")?.Value == "DocId")
                     ?.Attribute("Value")
                     .Value;
-                logger.Log($"De-duping signature: {targetSignature}", TraceLevel.Verbose);
 
                 var dupedElements = from xe
                         in elementSet
@@ -109,15 +109,10 @@ namespace tripled
 
 
                 var logEntry = $"Elements with matching signature: {dupedElements.Count()}";
-                if (dupedElements.Count() == 1)
-                {
-                    logEntry += $", {targetSignature} is CLEAN";
-                    logger.Log(logEntry, TraceLevel.Verbose);
-                }
-                else
+                if (dupedElements.Count() > 1)
                 {
                     logEntry += $", {targetSignature} is DIRTY";
-                    logger.Log(logEntry, TraceLevel.Warning);
+                    logger.Log(logEntry, file, TraceLevel.Warning);
 
                     elementsToRemove.AddRange(analyzer.PickLosingElements(dupedElements));
                 }
@@ -130,13 +125,18 @@ namespace tripled
                                   select e;
 
                     element.Remove();
+                    fileDirty = true;
                 }
             }
 
-            ProcessDupeContent(xml);
+            fileDirty |= ProcessDupeContent(file, xml, logger);
 
             var shouldDelete = PerformFrameworkValidation(xml, docIdCache);
-            if (!shouldDelete)
+            if (shouldDelete)
+            {
+                File.Delete(file);
+            }
+            else if (fileDirty)
             {
                 var xws = new XmlWriterSettings { OmitXmlDeclaration = true, Indent = true };
                 using (var xw = XmlWriter.Create(file, xws))
@@ -153,10 +153,6 @@ namespace tripled
                         Console.WriteLine(xml.ToString());
                     }
                 }
-            }
-            else
-            {
-                File.Delete(file);
             }
 
             Logger.InternalLog($"Individual members in the type: {elementSet.Count()}");
@@ -207,8 +203,9 @@ namespace tripled
             return false;
         }
 
-        private static void ProcessDupeContent(XDocument doc)
+        private static bool ProcessDupeContent(string file, XDocument doc, Logger logger)
         {
+            bool isDirty = false;
             if (doc == null) throw new ArgumentNullException(nameof(doc));
 
             var descendants = doc.Descendants("Docs");
@@ -230,7 +227,7 @@ namespace tripled
                     
                     if (sequenceCount > 1 && unaryElements.Contains(element.Key))
                     {
-                        Console.WriteLine("Elements in " + element.Key + " sequence: " + sequenceCount);
+                        logger.Log("Elements in " + element.Key + " sequence: " + sequenceCount, file);
                         // An element was detected that should be one, but is in several instances.
 
                         for (var i = 1; i < sequenceCount; i++)
@@ -242,6 +239,7 @@ namespace tripled
 
                         // For a given sequence, it's safe to assume that no other checks need to be done
                         // because we don't support dupe content in it anyway.
+                        isDirty = true;
                         continue;
                     }
 
@@ -268,11 +266,13 @@ namespace tripled
                             el.Elements().First(x =>
                                 x.ToString().Replace("  ", " ").Trim().Equals(targetContent,
                                     StringComparison.CurrentCulture)).Remove();
+                        isDirty = true;
                     }
 
                     contentAnalyzed.Clear();
                 }
             }
+            return isDirty;
         }
     }
 }
