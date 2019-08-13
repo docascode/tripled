@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
@@ -138,12 +139,24 @@ namespace tripled
             }
             else if (fileDirty)
             {
-                var xws = new XmlWriterSettings { OmitXmlDeclaration = true, Indent = true };
-                using (var xw = XmlWriter.Create(file, xws))
+                // these settings align with mdoc's XML settings
+                var settings = new XmlWriterSettings()
+                {
+                    NewLineChars = "\n",
+                    OmitXmlDeclaration = true,
+                    Indent = true,
+                    IndentChars = "  "
+                };
+
+                using (var stream = new StreamWriter(file, false, new UTF8Encoding(false)))
+                using (var xw = XmlWriter.Create(stream, settings))
                 {
                     try
                     {
                         xml.Save(xw);
+                        xw.Dispose();
+                        stream.WriteLine(); // trailing line break
+                        stream.Dispose();
                     }
                     catch (Exception ex)
                     {
